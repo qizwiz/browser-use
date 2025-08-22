@@ -19,7 +19,20 @@ logger = logging.getLogger(__name__)
 
 
 async def demo_iframe_detection_fix():
-    """Demonstrate the iframe detection fix."""
+    """
+    Showcase the iframe detection and interaction enhancement for browser-use (issue #1700).
+    
+    This asynchronous demo creates an Agent, applies enable_iframe_support to the agent's browser_session,
+    and prints a structured demonstration of the resulting capabilities and benefits. Output covers
+    detection and interaction improvements (iframes, cross-origin, nested), example use-cases solved,
+    a brief implementation outline, and key benefits.
+    
+    Side effects:
+    - Writes demo output to stdout.
+    - Instantiates an Agent and calls enable_iframe_support on its browser_session.
+    
+    No return value.
+    """
     
     print("🎯 Demo: Browser-Use Issue #1700 Fix")
     print("=" * 50)
@@ -82,7 +95,14 @@ async def demo_iframe_detection_fix():
 
 
 async def test_iframe_element_detection():
-    """Test actual iframe element detection (would need real browser)."""
+    """
+    Simulated test runner that prints example iframe element-detection scenarios.
+    
+    This asynchronous function lists a set of representative test cases (payment iframe, social-login widget, embedded chat)
+    and prints their URL, target selector, and the expected outcome. It does not interact with a browser or assert results;
+    it is intended as a demonstrative placeholder for what a real browser-driven test would exercise. Side effect: writes
+    human-readable output to standard output.
+    """
     
     print("\n🧪 Testing Iframe Element Detection:")
     print("-" * 40)
