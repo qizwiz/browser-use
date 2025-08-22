@@ -30,24 +30,14 @@ from typing import Any, Dict, Optional, Tuple
 import pytest
 
 
-# ---------- Dynamic import of the implementation under test ----------
-_IMPL_PATH = Path(__file__).parent / "test_iframe_detection.py"
-assert _IMPL_PATH.exists(), f"Implementation file not found at {_IMPL_PATH}"
-
-_spec = importlib.util.spec_from_file_location("iframe_detection_impl", _IMPL_PATH)
-_impl = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
-sys.modules["iframe_detection_impl"] = _impl  # make importable by name if needed
-assert _spec and _spec.loader, "Failed to create module spec for implementation"
-_spec.loader.exec_module(_impl)  # type: ignore[assignment]
-
-
-# Bring key symbols into local namespace for readability
-SimpleIframeDetection = _impl.SimpleIframeDetection
-FrameContext = _impl.FrameContext
-CrossFrameElement = _impl.CrossFrameElement
-IframeAwareController = _impl.IframeAwareController
-patch_browser_use_with_iframe_support = _impl.patch_browser_use_with_iframe_support
-
+# ---------- Import the actual product implementation ----------
+from browser_use.iframe_detection import (
+    SimpleIframeDetection,
+    FrameContext,
+    CrossFrameElement,
+    IframeAwareController,
+    patch_browser_use_with_iframe_support,
+)
 
 # ---------- Test doubles ----------
 @dataclass
