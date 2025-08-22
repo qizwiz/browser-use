@@ -55,6 +55,11 @@ class SimpleIframeDetection:
     """
     
     def __init__(self, browser_session: 'BrowserSession'):
+        """
+        Initialize the SimpleIframeDetection helper.
+        
+        Stores the provided BrowserSession and its logger, and initializes internal caches used for frame contexts and cross-frame element tracking. Begins cross-frame element indexing at 10000 to avoid collisions with in-page indices.
+        """
         self.browser_session = browser_session
         self.logger = browser_session.logger
         self._frame_cache: Dict[str, FrameContext] = {}
@@ -66,9 +71,18 @@ class SimpleIframeDetection:
         index: int
     ) -> Optional[EnhancedDOMTreeNode]:
         """
-        Enhanced element lookup that checks iframes if not found in main frame.
+        Locate a DOM element by its numeric index, searching the main frame first and then any iframes.
         
-        This is the core function that solves Issue #1700.
+        Attempts to find the element in the main frame via the browser session. If not found there, enumerates iframe frame contexts and searches each frame's dom_nodes. When an element is discovered inside an iframe, a CrossFrameElement wrapper is created, cached (assigned a new cross-frame index), and the found EnhancedDOMTreeNode is returned.
+        
+        Parameters:
+            index (int): Numeric index identifying the DOM node to find.
+        
+        Returns:
+            Optional[EnhancedDOMTreeNode]: The located element, or None if the element is not found in any frame or an error occurs.
+        
+        Side effects:
+            - When an element is found inside an iframe, a CrossFrameElement is created and stored in the detector's internal cache; the internal cross-frame index counter is incremented.
         """
         # First try the original browser-use method (main frame)
         element = await self.browser_session.get_dom_element_by_index(index)
@@ -113,9 +127,12 @@ class SimpleIframeDetection:
     
     async def _enumerate_all_frames(self) -> List[FrameContext]:
         """
-        Enumerate all frame contexts (main + iframes).
+        Return a list of FrameContext objects representing the main frame and any discovered iframes.
         
-        S-expression insight: recursive frame discovery
+        The function queries the browser session to build a FrameContext for the main frame and then uses the DomService to enumerate iframe targets and collect per-iframe FrameContext instances. If an error occurs while enumerating frames, the function falls back to returning a list containing only the main frame context.
+         
+        Returns:
+            List[FrameContext]: A list of discovered frame contexts (at least the main frame).
         """
         frame_contexts = []
         
@@ -144,7 +161,14 @@ class SimpleIframeDetection:
             return [await self._get_main_frame_context()]  # Fallback to main frame only
     
     async def _get_main_frame_context(self) -> FrameContext:
-        """Get context for the main frame."""
+        """
+        Return a FrameContext representing the top-level (main) browsing context.
+        
+        The returned FrameContext:
+        - Uses the session's cached selector map as dom_nodes (empty dict if missing).
+        - Sets frame_id to "main" and target_id to the session's current_target_id (or "main" if unset).
+        - Uses a coordinate_offset of (0, 0) and is_cross_origin=False.
+        """
         # Use existing cached selector map from browser-use
         dom_nodes = self.browser_session._cached_selector_map or {}
         
@@ -158,9 +182,18 @@ class SimpleIframeDetection:
     
     async def _get_iframe_context(self, target_id: str) -> Optional[FrameContext]:
         """
-        Get context for an iframe.
+        Builds and returns a FrameContext representing the iframe identified by target_id.
         
-        S-expression insight: iframe context = DOM tree + coordinate offset
+        The returned FrameContext contains the iframe's generated frame_id, the provided target_id,
+        a mapping of DOM nodes discovered for that iframe, and the iframe's coordinate offset
+        relative to the main frame. On failure (for example, if fetching offset or DOM nodes fails),
+        returns None.
+        
+        Parameters:
+            target_id (str): The browser target identifier for the iframe.
+        
+        Returns:
+            Optional[FrameContext]: A FrameContext for the iframe, or None if the context could not be constructed.
         """
         try:
             # Switch to iframe target to get its DOM
@@ -188,9 +221,15 @@ class SimpleIframeDetection:
     
     async def _calculate_iframe_offset(self, target_id: str) -> Tuple[int, int]:
         """
-        Calculate iframe's coordinate offset from main frame.
+        Compute the iframe's top-left offset (in pixels) relative to the main frame viewport.
         
-        S-expression insight: coordinate transformation as function composition
+        Parameters:
+            target_id (str): Identifier of the iframe's DevTools target (the iframe to measure).
+        
+        Returns:
+            Tuple[int, int]: (x, y) pixel offset from the main frame origin to the iframe's origin.
+            On error this may return (0, 0). Note: the current implementation returns a placeholder value (100, 50)
+            and should be replaced with CDP-based bounds retrieval in a real integration.
         """
         try:
             # This would use browser-use's CDP client to:
@@ -205,7 +244,21 @@ class SimpleIframeDetection:
             return (0, 0)
     
     async def _get_iframe_dom_nodes(self, target_id: str) -> Dict[int, EnhancedDOMTreeNode]:
-        """Get DOM nodes for a specific iframe target."""
+        """
+        Retrieve the serialized DOM nodes for the iframe identified by `target_id`.
+        
+        Detailed behavior:
+        - Intended to switch CDP context to the iframe target, obtain and serialize that frame's DOM tree into a mapping
+          keyed by element index (int) with values of EnhancedDOMTreeNode.
+        - Currently a placeholder: always returns an empty dict. On error it logs the exception and returns an empty dict.
+        
+        Parameters:
+            target_id (str): CDP target identifier for the iframe whose DOM should be retrieved.
+        
+        Returns:
+            Dict[int, EnhancedDOMTreeNode]: Mapping from element index to serialized DOM node for the iframe.
+            Currently always empty until implemented.
+        """
         try:
             # This would require:
             # 1. Switch CDP context to iframe target
@@ -225,9 +278,14 @@ class SimpleIframeDetection:
         frame_context: FrameContext
     ) -> Tuple[int, int, int, int]:
         """
-        Transform local iframe coordinates to global viewport coordinates.
+        Convert an element's rectangle from a frame-local coordinate space to global viewport coordinates.
         
-        S-expression insight: coordinate transformation as pure function
+        Parameters:
+            local_coords (Tuple[int, int, int, int]): (x, y, width, height) relative to the frame's origin.
+            frame_context (FrameContext): Frame context whose `coordinate_offset` (x_offset, y_offset) is added to the local x/y.
+        
+        Returns:
+            Tuple[int, int, int, int]: The transformed rectangle (global_x, global_y, width, height) in viewport coordinates.
         """
         x, y, width, height = local_coords
         offset_x, offset_y = frame_context.coordinate_offset
@@ -244,9 +302,14 @@ class SimpleIframeDetection:
         cross_frame_element: CrossFrameElement
     ) -> bool:
         """
-        Click an element that was found in an iframe.
+        Click an element located inside an iframe by transforming its iframe-local bounding rectangle to global viewport coordinates and dispatching CDP mouse events.
         
-        Uses coordinate transformation to click at the correct global position.
+        The provided CrossFrameElement must contain:
+        - element.rect: a bounding rectangle (x, y, width, height) in the iframe's local coordinate space.
+        - frame_context: a FrameContext with a valid coordinate_offset to translate local coordinates to global viewport coordinates.
+        
+        Returns:
+            bool: True if the click sequence (mousePressed and mouseReleased) was dispatched successfully; False on error (e.g., missing rect or CDP failure).
         """
         try:
             if not cross_frame_element.element.rect:
@@ -301,6 +364,14 @@ class IframeAwareController:
     """
     
     def __init__(self, original_controller, browser_session: 'BrowserSession'):
+        """
+        Initialize the IframeAwareController.
+        
+        Wraps an existing controller and attaches a SimpleIframeDetection instance (created from the provided browser session) to enable iframe-aware element lookup and interactions.
+        
+        Parameters:
+            original_controller: The controller instance to delegate standard (non-iframe) operations to.
+        """
         self.original_controller = original_controller
         self.iframe_detection = SimpleIframeDetection(browser_session)
         
@@ -309,7 +380,17 @@ class IframeAwareController:
         return await self.iframe_detection.get_element_by_index_with_iframe_support(index)
     
     async def enhanced_click_element_by_index(self, index: int) -> bool:
-        """Enhanced element clicking with iframe support."""
+        """
+        Click the element identified by a browser-use element index, using iframe-aware interaction when needed.
+        
+        Attempts to resolve the element (including searching iframes). If the resolved element belongs to an iframe, performs an iframe-aware click that translates coordinates and dispatches mouse events inside the iframe; otherwise, delegates to the original controller's click path for main-frame elements.
+        
+        Parameters:
+            index (int): The browser-use element index to click.
+        
+        Returns:
+            bool: True if the click action was performed (or delegated) successfully; False if the element could not be found or the iframe click failed.
+        """
         # First try to get element (will check iframes if needed)
         element = await self.enhanced_get_element_by_index(index)
         if not element:
@@ -329,9 +410,15 @@ class IframeAwareController:
 # Integration function for browser-use
 def patch_browser_use_with_iframe_support(browser_session: 'BrowserSession'):
     """
-    Monkey-patch browser-use to add iframe support.
+    Enable iframe-aware element lookup by monkey-patching the given BrowserSession.
     
-    This solves Issue #1700 by enhancing existing functionality.
+    Replaces browser_session.get_dom_element_by_index and browser_session.get_element_by_index
+    with an async lookup that consults iframes as well as the main frame. Returns a
+    SimpleIframeDetection instance that was installed and can be used to inspect or
+    undo the enhanced behavior.
+    
+    Returns:
+        SimpleIframeDetection: The iframe detection instance installed into the session.
     """
     iframe_detection = SimpleIframeDetection(browser_session)
     
@@ -340,6 +427,18 @@ def patch_browser_use_with_iframe_support(browser_session: 'BrowserSession'):
     
     # Create enhanced method
     async def enhanced_get_element(index: int) -> Optional[EnhancedDOMTreeNode]:
+        """
+        Return the DOM node for a given element index using iframe-aware lookup.
+        
+        This is a thin wrapper that delegates to the iframe detection layer to locate
+        an element across the main frame and any iframes.
+        
+        Parameters:
+            index (int): Element index used by the browser session's DOM selector map.
+        
+        Returns:
+            Optional[EnhancedDOMTreeNode]: The found DOM node, or None if not present.
+        """
         return await iframe_detection.get_element_by_index_with_iframe_support(index)
     
     # Replace method
@@ -352,7 +451,15 @@ def patch_browser_use_with_iframe_support(browser_session: 'BrowserSession'):
 
 # Example usage
 async def demo_iframe_detection():
-    """Demo showing how the iframe detection solves Issue #1700."""
+    """
+    Run a small demonstration of the iframe detection integration and its intended usage.
+    
+    This async demo shows how to patch a BrowserSession with iframe support (via
+    patch_browser_use_with_iframe_support) and how the resulting session and
+    controller calls (e.g., get_element_by_index and click_element_by_index) would
+    work transparently with elements inside iframes. The body is a lightweight
+    placeholder meant for manual or example runs (execute with `asyncio.run`).
+    """
     # This would be called in browser-use initialization
     # iframe_detection = patch_browser_use_with_iframe_support(browser_session)
     

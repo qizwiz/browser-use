@@ -23,9 +23,19 @@ logger = logging.getLogger(__name__)
 
 def enable_iframe_support(browser_session):
     """
-    Enable iframe support for a browser-use session.
+    Enable iframe detection support for a Browser-Use session.
     
-    This is the main function that solves Issue #1700.
+    Attempts to apply the iframe-detection patch to the provided browser session so the session
+    can recognize and interact with iframe elements (fix for Issue #1700). On success returns
+    the object produced by the patch operation; on failure the function logs the error and
+    returns None instead of raising.
+    
+    Parameters:
+        browser_session: an active BrowserSession instance to patch for iframe support.
+    
+    Returns:
+        The patch/iframe_detection object returned by patch_browser_use_with_iframe_support on success,
+        or None if patching failed.
     """
     try:
         iframe_detection = patch_browser_use_with_iframe_support(browser_session)
@@ -39,9 +49,11 @@ def enable_iframe_support(browser_session):
 # Auto-patch for existing browser-use code (optional)
 def auto_patch_browser_use():
     """
-    Automatically patch browser-use on import.
+    Monkey-patch BrowserSession so newly created browser sessions automatically enable iframe detection.
     
-    This would make iframe detection work transparently.
+    Replaces browser_use.browser.session.BrowserSession.__init__ with a wrapper that calls the original initializer
+    and then calls enable_iframe_support(self). Intended for use when imported to enable iframe support transparently
+    for all subsequently created BrowserSession instances. Failures are logged; the function does not raise.
     """
     try:
         # Import browser-use modules
@@ -53,6 +65,11 @@ def auto_patch_browser_use():
         # Create enhanced init
         def enhanced_init(self, *args, **kwargs):
             # Call original init
+            """
+            Wrapper for BrowserSession.__init__ that calls the original initializer and then enables iframe detection support.
+            
+            This function is intended to replace BrowserSession.__init__ via monkey-patching. It invokes the preserved original_init(self, *args, **kwargs) and afterwards calls enable_iframe_support(self) to attach iframe-aware detection to the newly initialized session.
+            """
             original_init(self, *args, **kwargs)
             
             # Add iframe support automatically
