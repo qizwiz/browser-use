@@ -37,6 +37,8 @@ def enable_iframe_support(browser_session):
 
 
 # Auto-patch for existing browser-use code (optional)
+from functools import wraps
+
 def auto_patch_browser_use():
     """
     Automatically patch browser-use on import.
@@ -46,11 +48,16 @@ def auto_patch_browser_use():
     try:
         # Import browser-use modules
         from browser_use.browser.session import BrowserSession
-        
+
+        # Idempotency guard
+        if getattr(BrowserSession, "_iframe_init_patched", False):
+            logger.info("ℹ️ BrowserSession.__init__ already auto-patched; skipping")
+            return
+
         # Store original session init
         original_init = BrowserSession.__init__
-        
-        # Create enhanced init
+
+        @wraps(original_init)
         def enhanced_init(self, *args, **kwargs):
             # Call original init
             original_init(self, *args, **kwargs)
@@ -60,12 +67,12 @@ def auto_patch_browser_use():
         
         # Replace init method
         BrowserSession.__init__ = enhanced_init
+        BrowserSession._iframe_init_patched = True
         
         logger.info("🚀 Browser-use auto-patched with iframe support!")
         
     except Exception as e:
         logger.error(f"Auto-patch failed: {e}")
-
 
 if __name__ == "__main__":
     # Demo the patch
