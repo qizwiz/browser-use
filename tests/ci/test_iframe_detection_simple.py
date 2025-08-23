@@ -2,13 +2,6 @@
 Test the iframe detection implementation.
 """
 
-import asyncio
-import sys
-import os
-
-# Add the current directory to the path so we can import browser_use
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 def test_iframe_detection_structure():
     """Test that iframe detection classes and methods are properly defined."""
     # Import the iframe detection module
