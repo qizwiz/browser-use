@@ -185,3 +185,75 @@ async def test_main_block_is_guarded(monkeypatch):
     # Assert functions are defined but not executed
     assert hasattr(mod, "demo_iframe_detection_fix")
     assert hasattr(mod, "test_iframe_element_detection")
+# ----------------------------------------------------------------------
+# Additional unit tests appended to increase coverage of demo iframe fix.
+# These tests use pytest with pytest-asyncio for async coroutines.
+# Focus: truthy/falsey handling, exception propagation, call count, isolation.
+# ----------------------------------------------------------------------
+
+import sys
+
+@pytest.mark.asyncio
+async def test_demo_iframe_detection_fix_exception_propagates_when_enable_raises():
+    # Arrange: enable_iframe_support callable raises an exception
+    def raiser(session):
+        raise RuntimeError("boom")
+    mod, _ = import_demo_module(enable_returns=raiser, has_browser_session=True)
+
+    # Act & Assert: exception should propagate (document current behavior)
+    with pytest.raises(RuntimeError, match="boom"):
+        await mod.demo_iframe_detection_fix()
+
+@pytest.mark.asyncio
+async def test_demo_iframe_detection_fix_treats_truthy_nonbool_as_success(capsys):
+    # Arrange: enable_iframe_support returns a non-bool truthy value
+    def returns_string(session):
+        return "ENABLED"  # truthy, non-bool
+    mod, _ = import_demo_module(enable_returns=returns_string, has_browser_session=True)
+
+    # Act
+    await mod.demo_iframe_detection_fix()
+
+    # Assert: success branch output observed
+    out = capsys.readouterr().out
+    assert "✅ Iframe detection enabled!" in out
+
+@pytest.mark.asyncio
+async def test_demo_iframe_detection_fix_treats_falsey_nonbool_as_failure(capsys):
+    # Arrange: enable_iframe_support returns a non-bool falsey value
+    def returns_empty_list(session):
+        return []  # falsey, non-bool
+    mod, _ = import_demo_module(enable_returns=returns_empty_list, has_browser_session=True)
+
+    # Act
+    await mod.demo_iframe_detection_fix()
+
+    # Assert: failure branch output observed
+    out = capsys.readouterr().out
+    assert "❌ Failed to enable iframe detection" in out
+
+@pytest.mark.asyncio
+async def test_enable_iframe_support_invoked_exactly_once():
+    # Arrange: count invocations of enable_iframe_support
+    calls = {"n": 0}
+    def counter(session):
+        calls["n"] += 1
+        return True
+    mod, _ = import_demo_module(enable_returns=counter, has_browser_session=True)
+
+    # Act
+    await mod.demo_iframe_detection_fix()
+
+    # Assert: ensure single invocation (no redundant calls)
+    assert calls["n"] == 1
+
+def test_import_demo_module_cleans_up_sys_modules():
+    # Ensure import-time stubs do not leak into global sys.modules after import
+    before_browser_use = sys.modules.get("browser_use")
+    before_iframe_patch = sys.modules.get("iframe_patch")
+
+    mod, stubs = import_demo_module(enable_returns=True, has_browser_session=True)
+
+    # After import, stubs should have been restored/removed per pre-import state
+    assert sys.modules.get("browser_use") is before_browser_use
+    assert sys.modules.get("iframe_patch") is before_iframe_patch
