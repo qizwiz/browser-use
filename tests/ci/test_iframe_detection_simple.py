@@ -2,29 +2,16 @@
 Test the iframe detection implementation.
 """
 
-import sys
-import os
-
-# Add the project root to the path so we can import browser_use
-project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, project_root)
-
-
 def test_iframe_detection_structure():
     """Test that iframe detection classes and methods are properly defined."""
     # Import the iframe detection module
-    try:
-        from browser_use.iframe_detection import (
-            SimpleIframeDetection, 
-            FrameContext, 
-            CrossFrameElement,
-            patch_browser_use_with_iframe_support,
-            unpatch_browser_use
-        )
-    except ImportError as e:
-        print(f"Failed to import from browser_use.iframe_detection: {e}")
-        # Try direct import approach
-        raise e
+    from browser_use.iframe_detection import (
+        SimpleIframeDetection, 
+        FrameContext, 
+        CrossFrameElement,
+        patch_browser_use_with_iframe_support,
+        unpatch_browser_use
+    )
     
     # Test that classes exist and have the expected structure
     assert SimpleIframeDetection is not None
@@ -55,12 +42,7 @@ def test_iframe_detection_structure():
 
 def test_iframe_patch_functions():
     """Test that iframe patch functions are properly defined."""
-    try:
-        from iframe_patch import enable_iframe_support, auto_patch_browser_use
-    except ImportError as e:
-        print(f"Failed to import from iframe_patch: {e}")
-        # Try direct import approach
-        raise e
+    from iframe_patch import enable_iframe_support, auto_patch_browser_use
     
     assert enable_iframe_support is not None
     assert auto_patch_browser_use is not None
