@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-async def demo_iframe_detection_fix():
+async def demo_iframe_fix():
     """Demonstrate the iframe detection fix."""
     
     print("🎯 Demo: Browser-Use Issue #1700 Fix")
@@ -120,5 +120,5 @@ async def test_iframe_element_detection():
 
 
 if __name__ == "__main__":
-    asyncio.run(demo_iframe_detection_fix())
+    asyncio.run(demo_iframe_fix())
     asyncio.run(test_iframe_element_detection())

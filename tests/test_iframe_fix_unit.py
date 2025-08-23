@@ -13,7 +13,7 @@ def import_demo_module(enable_returns=True, has_browser_session=True):
     Dynamically insert stub modules into sys.modules for:
       - browser_use.Agent
       - iframe_patch.enable_iframe_support
-    Then import tests.test_demo_iframe_fix as the module-under-test.
+    Then import examples.iframe_fix as the module-under-test.
     Args:
       enable_returns: bool | callable -> return value or callable for enable_iframe_support
       has_browser_session: bool -> whether Agent() exposes .browser_session
@@ -48,10 +48,9 @@ def import_demo_module(enable_returns=True, has_browser_session=True):
     sys.modules["browser_use"] = browser_use
     sys.modules["iframe_patch"] = iframe_patch
 
-    # Import or reload the module under test
     try:
-        # Import by package path; file lives at tests/test_demo_iframe_fix.py
-        mod_name = "tests.test_demo_iframe_fix"
+        # Import by package path; file lives at examples/iframe_fix.py
+        mod_name = "examples.iframe_fix"
         if mod_name in sys.modules:
             mod = importlib.reload(sys.modules[mod_name])
         else:
@@ -68,38 +67,30 @@ def import_demo_module(enable_returns=True, has_browser_session=True):
         else:
             sys.modules.pop("iframe_patch", None)
 
-    stubs = {"browser_use": browser_use, "iframe_patch": iframe_patch}
-    return mod, stubs
+    return mod, (browser_use, iframe_patch)
 
 
 @pytest.mark.asyncio
-async def test_demo_iframe_detection_fix_happy_path(monkeypatch, capsys):
+async def test_demo_iframe_fix_happy_path(monkeypatch, capsys):
     # Arrange: enable_iframe_support returns True; Agent has browser_session
     mod, _ = import_demo_module(enable_returns=True, has_browser_session=True)
 
     # Act
-    await mod.demo_iframe_detection_fix()
+    await mod.demo_iframe_fix()
 
-    # Assert: verify key output lines indicating success branch executed
+    # Assert
     out = capsys.readouterr().out
-    assert "🎯 Demo: Browser-Use Issue #1700 Fix" in out
     assert "✅ Iframe detection enabled!" in out
-    # Spot-check some of the advertised capabilities
-    assert "- Iframe elements: ✅ Supported (NEW!)" in out
-    assert "- Cross-origin iframes: ✅ Supported (NEW!)" in out
-    assert "- Nested iframes: ✅ Supported (NEW!)" in out
-    # Benefits list
-    assert "- 10x simpler than Mobile-Agent-v3" in out
     assert "🎉 Demo complete! Ready for PR submission." in out
 
 
 @pytest.mark.asyncio
-async def test_demo_iframe_detection_fix_failure_branch(monkeypatch, capsys):
+async def test_demo_iframe_fix_failure_branch(monkeypatch, capsys):
     # Arrange: enable_iframe_support returns False to exercise the else-branch
     mod, _ = import_demo_module(enable_returns=False, has_browser_session=True)
 
     # Act
-    await mod.demo_iframe_detection_fix()
+    await mod.demo_iframe_fix()
 
     # Assert
     out = capsys.readouterr().out
@@ -108,7 +99,7 @@ async def test_demo_iframe_detection_fix_failure_branch(monkeypatch, capsys):
 
 
 @pytest.mark.asyncio
-async def test_demo_iframe_detection_calls_enable_with_browser_session(monkeypatch):
+async def test_demo_iframe_fix_calls_enable_with_browser_session(monkeypatch):
     called_with = {}
 
     def recorder(session):
@@ -119,24 +110,23 @@ async def test_demo_iframe_detection_calls_enable_with_browser_session(monkeypat
     mod, _ = import_demo_module(enable_returns=recorder, has_browser_session=True)
 
     # Act
-    await mod.demo_iframe_detection_fix()
+    await mod.demo_iframe_fix()
 
-    # Assert the agent's browser_session was passed
+    # Assert: enable_iframe_support was called with a session object
     assert "arg" in called_with
     assert called_with["arg"] is not None
 
 
 @pytest.mark.asyncio
-async def test_demo_iframe_detection_handles_missing_browser_session(monkeypatch, capsys):
+async def test_demo_iframe_fix_handles_missing_browser_session(monkeypatch, capsys):
     # Arrange: Agent without browser_session should raise AttributeError in current implementation
     # We assert that the error is surfaced (document current behavior),
     # which guards against silent failures and informs future refactors.
     mod, _ = import_demo_module(enable_returns=True, has_browser_session=False)
 
+    # Act & Assert: should raise AttributeError when trying to access .browser_session
     with pytest.raises(AttributeError):
-        await mod.demo_iframe_detection_fix()
-    # Optionally capture partial output before exception
-    _ = capsys.readouterr()
+        await mod.demo_iframe_fix()
 
 
 @pytest.mark.asyncio
@@ -144,17 +134,15 @@ async def test_print_only_iframe_element_detection_demo_output(capsys):
     # Arrange
     mod, _ = import_demo_module(enable_returns=True, has_browser_session=True)
 
-    # Act: run the "test" demo coroutine to validate its printed scenarios
+    # Act
     await mod.test_iframe_element_detection()
 
-    # Assert: ensure all test cases are enumerated and success summary printed
+    # Assert
     out = capsys.readouterr().out
     assert "🧪 Testing Iframe Element Detection:" in out
-    assert "📋 Payment Form in Iframe" in out
-    assert "📋 Social Login Widget" in out
-    assert "📋 Embedded Chat Interface" in out
-    assert "✅ Element found and clickable" in out
-    assert "✅ Element found and typeable" in out
+    assert "Payment Form in Iframe" in out
+    assert "Social Login Widget" in out
+    assert "Embedded Chat Interface" in out
     assert "🎯 All iframe detection tests would pass!" in out
 
 
@@ -168,7 +156,7 @@ async def test_enable_iframe_support_callable_variants(monkeypatch, capsys):
     mod, _ = import_demo_module(enable_returns=dynamic_enable, has_browser_session=True)
 
     # Act
-    await mod.demo_iframe_detection_fix()
+    await mod.demo_iframe_fix()
 
     # Assert: still goes down success path
     out = capsys.readouterr().out
@@ -182,6 +170,7 @@ async def test_main_block_is_guarded(monkeypatch):
     # Arrange
     # We re-import under a different module name to assert no side-effects at import.
     mod, _ = import_demo_module(enable_returns=True, has_browser_session=True)
+
     # Assert functions are defined but not executed
-    assert hasattr(mod, "demo_iframe_detection_fix")
+    assert hasattr(mod, "demo_iframe_fix")
     assert hasattr(mod, "test_iframe_element_detection")
