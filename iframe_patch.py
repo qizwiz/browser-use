@@ -34,7 +34,7 @@ def enable_iframe_support(browser_session):
         logger.info("Iframe detection enabled")
         return iframe_detection
     except Exception as e:
-        logger.error("Failed to enable iframe support", exc_info=e)
+        logger.error(f"Failed to enable iframe support: {e}")
         return None
 
 
@@ -75,7 +75,7 @@ def auto_patch_browser_use():
         logger.info("auto-patched BrowserSession")
         
     except Exception as e:
-        logger.error("Auto-patch failed", exc_info=e)
+        logger.error(f"Auto-patch failed: {e}")
 
 if __name__ == "__main__":
     # Demo the patch
