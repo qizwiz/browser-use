@@ -76,6 +76,9 @@ jobs:
           activate-environment: true
 
       - run: uv sync --dev --all-extras
+      
+      - name: Install Playwright CLI
+        run: uv pip install playwright
 
       - name: Detect installed Playwright version
         run: echo "PLAYWRIGHT_VERSION=$(uv pip list --format json | jq -r '.[] | select(.name == "playwright") | .version')" >> $GITHUB_ENV
@@ -89,9 +92,9 @@ jobs:
 
       - name: Install Chrome stable binary
         run: |
-          sudo apt-get update -qq \
-          && sudo curl -o "/tmp/google-chrome-stable_current_amd64.deb" --no-clobber "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb" \
-          && sudo apt-get install -y "/tmp/google-chrome-stable_current_amd64.deb" -f
+          sudo apt-get update -qq
+          sudo curl -o "/tmp/google-chrome-stable_current_amd64.deb" --no-clobber "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
+          sudo apt-get install -y "/tmp/google-chrome-stable_current_amd64.deb" -f
 
       - run: playwright install chrome --with-deps
 
@@ -103,7 +106,6 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-playwright-${{ env.PLAYWRIGHT_VERSION }}-chromium
 
       - run: playwright install chromium --with-deps
-      # - run: playwright install chromium --with-deps
 
       - name: Cache browser-use extensions
         uses: actions/cache@v4
@@ -136,6 +138,9 @@ jobs:
           activate-environment: true
 
       - run: uv sync --dev --all-extras
+      
+      - name: Install Playwright CLI
+        run: uv pip install playwright
 
       - name: Detect installed Playwright version
         run: echo "PLAYWRIGHT_VERSION=$(uv pip list --format json | jq -r '.[] | select(.name == "playwright") | .version')" >> $GITHUB_ENV
@@ -149,9 +154,9 @@ jobs:
 
       - name: Install Chrome stable binary
         run: |
-          sudo apt-get update -qq 
-          && sudo curl -o "/tmp/google-chrome-stable_current_amd64.deb" --no-clobber "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb" 
-          && sudo apt-get install -y "/tmp/google-chrome-stable_current_amd64.deb" -f
+          sudo apt-get update -qq
+          sudo curl -o "/tmp/google-chrome-stable_current_amd64.deb" --no-clobber "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
+          sudo apt-get install -y "/tmp/google-chrome-stable_current_amd64.deb" -f
 
       - run: playwright install chrome --with-deps
 
