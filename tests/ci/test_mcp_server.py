@@ -445,7 +445,7 @@ class TestMCPServerTabManagement:
 	async def test_switch_tab(self, mcp_server_with_tabs):
 		"""Test switching tabs."""
 		# Switch to first tab
-		result = await mcp_server_with_tabs._switch_tab(0)
+		result = await mcp_server_with_tabs._switch_tab("0")
 
 		assert 'Switched to tab 0' in result
 		assert '/tab1' in result
@@ -475,7 +475,7 @@ class TestMCPServerTabManagement:
 		server = BrowserUseServer()
 
 		assert await server._list_tabs() == 'Error: No browser session active'
-		assert await server._switch_tab(0) == 'Error: No browser session active'
+		assert await server._switch_tab("0") == 'Error: No browser session active'
 		assert await server._close_tab(0) == 'Error: No browser session active'
 
 

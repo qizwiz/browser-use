@@ -21,6 +21,7 @@ from pytest_httpserver.httpserver import HandlerType
 from browser_use.agent.views import ActionResult
 from browser_use.browser import BrowserSession
 from browser_use.browser.profile import BrowserProfile
+from playwright.async_api import Page
 from browser_use.controller.registry.service import Registry
 from browser_use.controller.registry.views import ActionModel as BaseActionModel
 from browser_use.controller.views import (
