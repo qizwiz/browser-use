@@ -185,3 +185,123 @@ def test_enable_iframe_support_propagates_return_value_types(monkeypatch):
         with isolated_import("iframe_patch") as iframe_patch:
             got = iframe_patch.enable_iframe_support(object())
             assert got == retval, f"enable_iframe_support should return the exact value from patch function: {retval!r}"
+
+# ---------------------------------------------------------------------------
+# Additional tests (Framework: pytest)
+# These tests extend coverage for error paths, idempotency, and edge cases.
+# ---------------------------------------------------------------------------
+
+def test_enable_iframe_support_missing_iframe_detection_module(caplog):
+    # Arrange: create fakes, then remove iframe_detection to force ImportError path
+    make_fake_browser_use_modules()
+    sys.modules.pop("browser_use.iframe_detection", None)
+
+    with isolated_import("iframe_patch") as iframe_patch:
+        caplog.clear()
+        caplog.set_level("ERROR")
+
+        # Act
+        result = iframe_patch.enable_iframe_support(object())
+
+        # Assert
+        assert result is None
+        assert any("Failed to enable iframe support" in rec.message for rec in caplog.records), \
+            "Expected ERROR log when iframe_detection module is missing."
+
+
+def test_enable_iframe_support_missing_patch_function_logs_error_and_returns_none(caplog):
+    # Arrange: create fakes but remove the expected patch function attribute
+    fake_iframe_mod, _ = make_fake_browser_use_modules()
+    if hasattr(fake_iframe_mod, "patch_browser_use_with_iframe_support"):
+        delattr(fake_iframe_mod, "patch_browser_use_with_iframe_support")
+
+    with isolated_import("iframe_patch") as iframe_patch:
+        caplog.clear()
+        caplog.set_level("ERROR")
+
+        # Act
+        result = iframe_patch.enable_iframe_support(object())
+
+        # Assert
+        assert result is None, "Should return None when patch function is unavailable."
+        # Be tolerant to message wording but require a clear failure signal
+        assert any("Failed to enable iframe support" in rec.message or
+                   "patch_browser_use_with_iframe_support" in rec.message
+                   for rec in caplog.records), \
+            "Expected ERROR log indicating missing patch function."
+
+
+def test_auto_patch_browser_use_is_idempotent(monkeypatch):
+    # Arrange
+    _, fake_session_mod = make_fake_browser_use_modules()
+    with isolated_import("iframe_patch") as iframe_patch:
+        calls = []
+
+        def fake_enable(self):
+            calls.append(self)
+
+        monkeypatch.setattr(iframe_patch, "enable_iframe_support", fake_enable, raising=True)
+
+        # Act: first patch
+        iframe_patch.auto_patch_browser_use()
+        first = fake_session_mod.BrowserSession.__init__
+
+        # Act: second patch should NOT wrap again
+        iframe_patch.auto_patch_browser_use()
+        second = fake_session_mod.BrowserSession.__init__
+
+        # Assert: same function object -> not double-wrapped
+        assert first is second, "auto_patch_browser_use should be idempotent and avoid double-wrapping __init__."
+
+        # Instantiate a couple of times to ensure wrapper still functional
+        inst1 = fake_session_mod.BrowserSession()
+        inst2 = fake_session_mod.BrowserSession()
+        assert len(calls) == 2 and calls[0] is inst1 and calls[1] is inst2, \
+            "Patched __init__ must call enable_iframe_support exactly once per instantiation."
+
+
+def test_auto_patch_browser_use_handles_class_without_custom_init(monkeypatch):
+    # Arrange: simulate BrowserSession without a custom __init__
+    _, fake_session_mod = make_fake_browser_use_modules()
+    fake_session_mod.BrowserSession.__init__ = object.__init__  # no custom side-effects
+
+    with isolated_import("iframe_patch") as iframe_patch:
+        calls = []
+
+        def fake_enable(self):
+            calls.append(self)
+
+        monkeypatch.setattr(iframe_patch, "enable_iframe_support", fake_enable, raising=True)
+
+        # Act: autopatch and instantiate with no args (object.__init__ accepts only self)
+        iframe_patch.auto_patch_browser_use()
+        inst = fake_session_mod.BrowserSession()
+
+        # Assert: enable_iframe_support still invoked with the created instance
+        assert calls and calls[0] is inst, \
+            "enable_iframe_support should be invoked even when BrowserSession has no custom __init__."
+
+
+def test_auto_patch_browser_use_continues_when_enable_raises(monkeypatch, caplog):
+    # Arrange
+    _, fake_session_mod = make_fake_browser_use_modules()
+    with isolated_import("iframe_patch") as iframe_patch:
+        def raising_enable(self):
+            raise RuntimeError("enable failed")
+
+        monkeypatch.setattr(iframe_patch, "enable_iframe_support", raising_enable, raising=True)
+
+        caplog.clear()
+        caplog.set_level("ERROR")
+
+        # Act: autopatch and construct session
+        iframe_patch.auto_patch_browser_use()
+        # Should not raise during construction; original __init__ should still run
+        inst = fake_session_mod.BrowserSession(11, key="v")
+
+        # Assert: original init side effects preserved and error logged
+        assert getattr(inst, "inited", False) is True, "Original __init__ side effects must still occur."
+        assert any(("enable" in rec.message.lower() and "fail" in rec.message.lower()) or
+                   "Failed to enable iframe support" in rec.message
+                   for rec in caplog.records), \
+            "Expected an ERROR log when enable_iframe_support raises within patched __init__."
