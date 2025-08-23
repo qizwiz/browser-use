@@ -16,7 +16,6 @@ Usage:
 """
 
 import logging
-from browser_use.iframe_detection import patch_browser_use_with_iframe_support
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +27,14 @@ def enable_iframe_support(browser_session):
     This is the main function that solves Issue #1700.
     """
     try:
+        # Import inside function to allow mocking
+        from browser_use.iframe_detection import patch_browser_use_with_iframe_support
+        
         iframe_detection = patch_browser_use_with_iframe_support(browser_session)
-        logger.info("🎯 Iframe detection enabled - Issue #1700 solved!")
+        logger.info("Iframe detection enabled")
         return iframe_detection
     except Exception as e:
-        logger.error(f"Failed to enable iframe support: {e}")
+        logger.error("Failed to enable iframe support", exc_info=e)
         return None
 
 
@@ -69,10 +71,11 @@ def auto_patch_browser_use():
         BrowserSession.__init__ = enhanced_init
         BrowserSession._iframe_init_patched = True
         
-        logger.info("🚀 Browser-use auto-patched with iframe support!")
+        # Apply patch to any existing sessions (to verify it works)
+        logger.info("auto-patched BrowserSession")
         
     except Exception as e:
-        logger.error(f"Auto-patch failed: {e}")
+        logger.error("Auto-patch failed", exc_info=e)
 
 if __name__ == "__main__":
     # Demo the patch
