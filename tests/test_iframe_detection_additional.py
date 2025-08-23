@@ -447,3 +447,219 @@ def test_enumerate_all_frames_error_fallback_to_main(monkeypatch, caplog):
         assert isinstance(contexts, list) and len(contexts) == 1
         assert contexts[0].frame_id == "main"
         assert any("Error enumerating frames" in rec.message for rec in caplog.records)
+
+# ---------- Additional coordinate transform edge cases ----------
+def test_transform_coordinates_to_global_zero_offset_and_large_values():
+    sess = FakeBrowserSession()
+    det = SimpleIframeDetection(sess)
+    ctx = FrameContext(frame_id="main", target_id="t-main", dom_nodes={}, coordinate_offset=(0, 0))
+    # Very large coordinates should be added correctly without mutation of size
+    assert det.transform_coordinates_to_global((10_000_000, 20_000_000, 1, 1), ctx) == (10_000_000, 20_000_000, 1, 1)
+
+def test_transform_coordinates_to_global_mixed_signs():
+    sess = FakeBrowserSession()
+    det = SimpleIframeDetection(sess)
+    ctx = FrameContext(frame_id="if2", target_id="t2", dom_nodes={}, coordinate_offset=(15, -10))
+    assert det.transform_coordinates_to_global((5, 25, 2, 2), ctx) == (20, 15, 2, 2)
+
+# ---------- Cross-frame element caching lifecycle ----------
+def test_get_element_by_index_iframe_cached_index_is_reused(monkeypatch):
+    """
+    On repeated lookup of the same original index inside the same iframe context,
+    ensure the next cross-frame index does not keep incrementing and the same cached
+    CrossFrameElement is used.
+    """
+    elem = FakeElement(FakeRect(1, 1, 2, 2))
+    iframe_ctx = FrameContext(
+        frame_id="iframe_ZZZ9",
+        target_id="target-ZZZ9",
+        dom_nodes={21: elem},
+        coordinate_offset=(3, 4),
+        is_cross_origin=True,
+        parent_frame_id="main",
+    )
+    sess = FakeBrowserSession()
+    det = SimpleIframeDetection(sess)
+
+    # First enumeration returns main + iframe_ctx
+    async def _frames_first():
+        return [arun(det._get_main_frame_context()), iframe_ctx]
+    # Second enumeration should not be necessary if cache is used, but provide a safe default
+    async def _frames_second():
+        return [arun(det._get_main_frame_context()), iframe_ctx]
+
+    calls = {"count": 0}
+    async def _frames_wrapper():
+        calls["count"] += 1
+        return await (_frames_first() if calls["count"] == 1 else _frames_second())
+
+    monkeypatch.setattr(det, "_enumerate_all_frames", _frames_wrapper)
+
+    # First lookup populates cache
+    res1 = arun(det.get_element_by_index_with_iframe_support(21))
+    assert res1 is elem
+    first_cfi_index = next(iter(det._cross_frame_elements.keys()))
+    cfi1 = det._cross_frame_elements[first_cfi_index]
+
+    # Second lookup should re-use the same CrossFrameElement and not allocate a new index
+    res2 = arun(det.get_element_by_index_with_iframe_support(21))
+    assert res2 is elem
+    assert len(det._cross_frame_elements) == 1
+    cfi2 = det._cross_frame_elements[first_cfi_index]
+    assert cfi1 is cfi2
+    # _enumerate_all_frames should have run at most twice (guarding against runaway calls)
+    assert calls["count"] <= 2
+
+def test_get_element_by_index_iframe_different_original_indices_allocate_new(monkeypatch):
+    """Different original indices in iframe should allocate distinct cross-frame indices."""
+    iframe_ctx = FrameContext(
+        frame_id="iframe_QWER",
+        target_id="target-QWER",
+        dom_nodes={7: FakeElement(FakeRect(0,0,1,1)), 8: FakeElement(FakeRect(0,0,1,1))},
+        coordinate_offset=(0, 0),
+        is_cross_origin=True,
+        parent_frame_id="main",
+    )
+    sess = FakeBrowserSession()
+    det = SimpleIframeDetection(sess)
+
+    async def _frames():
+        return [arun(det._get_main_frame_context()), iframe_ctx]
+    monkeypatch.setattr(det, "_enumerate_all_frames", _frames)
+
+    _ = arun(det.get_element_by_index_with_iframe_support(7))
+    _ = arun(det.get_element_by_index_with_iframe_support(8))
+
+    assert len(det._cross_frame_elements) == 2
+    idxs = sorted(det._cross_frame_elements.keys())
+    assert idxs == list(range(idxs[0], idxs[0] + 2)), "Allocations should be contiguous and increasing"
+
+# ---------- CDP mouse dispatch failure path and parameter assertions ----------
+def test_click_element_in_iframe_includes_expected_parameters():
+    sess = FakeBrowserSession()
+    det = SimpleIframeDetection(sess)
+    ctx = FrameContext(
+        frame_id="iframe_PARAM",
+        target_id="PARAM",
+        dom_nodes={},
+        coordinate_offset=(10, 10),
+        is_cross_origin=True,
+        parent_frame_id="main",
+    )
+    elem = FakeElement(FakeRect(0, 0, 10, 10))
+    cfe = CrossFrameElement(element=elem, frame_context=ctx, original_index=3, cross_frame_index=10005)
+    ok = arun(det.click_element_in_iframe(cfe))
+    assert ok is True
+    # Assert button/type included and call order
+    calls = [c for c in sess.cdp_client_calls if c[0] == "dispatchMouseEvent"]
+    assert [c[1]["type"] for c in calls] == ["mousePressed", "mouseReleased"]
+    assert all("button" in c[1] for c in calls), "Mouse events should include a 'button' field"
+    assert all(c[1]["x"] >= 10 and c[1]["y"] >= 10 for c in calls), "Global coords should be offset by (10,10)"
+
+def test_click_element_in_iframe_cdp_failure_gracefully_returns_false():
+    sess = FakeBrowserSession(cdp_raise_on="mousePressed")
+    det = SimpleIframeDetection(sess)
+    ctx = FrameContext(
+        frame_id="iframe_FAIL",
+        target_id="FAIL",
+        dom_nodes={},
+        coordinate_offset=(0, 0),
+        is_cross_origin=True,
+        parent_frame_id="main",
+    )
+    elem = FakeElement(FakeRect(2, 2, 4, 4))
+    cfe = CrossFrameElement(element=elem, frame_context=ctx, original_index=9, cross_frame_index=10009)
+    ok = arun(det.click_element_in_iframe(cfe))
+    assert ok is False
+
+# ---------- Iframe context derivation for short target IDs ----------
+def test_get_iframe_context_short_target_id_suffix_handling(monkeypatch):
+    """
+    If target id shorter than 4 chars, frame_id suffixing should not crash.
+    We assert it still produces a valid FrameContext.
+    """
+    sess = FakeBrowserSession()
+    det = SimpleIframeDetection(sess)
+
+    async def _off(_tid: str):
+        return (1, 1)
+    async def _dom(_tid: str):
+        return {}
+
+    monkeypatch.setattr(det, "_calculate_iframe_offset", _off)
+    monkeypatch.setattr(det, "_get_iframe_dom_nodes", _dom)
+
+    ctx = arun(det._get_iframe_context("xy"))
+    assert ctx is not None
+    assert ctx.target_id == "xy"
+    assert isinstance(ctx.frame_id, str) and ctx.frame_id.startswith("iframe_")
+    assert ctx.coordinate_offset == (1, 1)
+    assert ctx.is_cross_origin is True
+    assert ctx.parent_frame_id == "main"
+
+# ---------- IframeAwareController extended behaviors ----------
+def test_controller_enhanced_click_reuses_cached_cross_frame_then_succeeds(monkeypatch):
+    sess = FakeBrowserSession()
+    ctrl = IframeAwareController(original_controller=None, browser_session=sess)
+
+    # Put a cross-frame entry into detection
+    ctx = FrameContext(frame_id="iframe_CTR", target_id="CTR", dom_nodes={}, coordinate_offset=(0, 0), is_cross_origin=True)
+    elem = FakeElement(FakeRect(5, 5, 10, 10))
+    cfe = CrossFrameElement(element=elem, frame_context=ctx, original_index=11, cross_frame_index=11)
+    ctrl.iframe_detection._cross_frame_elements[11] = cfe
+
+    # Ensure enhanced_get_element_by_index returns non-None to pass guard
+    async def _getter(idx: int):
+        return elem
+    monkeypatch.setattr(ctrl, "enhanced_get_element_by_index", _getter)
+
+    # Click path: record that it's called
+    called = {"n": 0}
+    async def _click(cf: CrossFrameElement) -> bool:
+        called["n"] += 1
+        return True
+    monkeypatch.setattr(ctrl.iframe_detection, "click_element_in_iframe", _click)
+
+    ok = arun(ctrl.enhanced_click_element_by_index(11))
+    assert ok is True and called["n"] == 1
+
+def test_controller_enhanced_click_cross_frame_click_failure_bubbles_false(monkeypatch):
+    sess = FakeBrowserSession()
+    ctrl = IframeAwareController(original_controller=None, browser_session=sess)
+    ctx = FrameContext(frame_id="iframe_BAD", target_id="BAD", dom_nodes={}, coordinate_offset=(0, 0), is_cross_origin=True)
+    elem = FakeElement(FakeRect(0, 0, 1, 1))
+    cfe = CrossFrameElement(element=elem, frame_context=ctx, original_index=13, cross_frame_index=13)
+    ctrl.iframe_detection._cross_frame_elements[13] = cfe
+
+    async def _getter(idx: int):
+        return elem
+    monkeypatch.setattr(ctrl, "enhanced_get_element_by_index", _getter)
+
+    async def _click_fail(cf: CrossFrameElement) -> bool:
+        return False
+    monkeypatch.setattr(ctrl.iframe_detection, "click_element_in_iframe", _click_fail)
+
+    ok = arun(ctrl.enhanced_click_element_by_index(13))
+    assert ok is False
+
+# ---------- Patch integration defensive checks ----------
+def test_patch_browser_use_with_iframe_support_idempotent_patch_application(monkeypatch):
+    """
+    Applying the patch twice should still yield a working detector and keep methods present.
+    This guards against double-patching in integrators.
+    """
+    async def _orig_get(idx: int):
+        return None
+
+    sess = FakeBrowserSession()
+    setattr(sess, "get_dom_element_by_index", _orig_get)
+
+    detector1 = patch_browser_use_with_iframe_support(sess)
+    detector2 = patch_browser_use_with_iframe_support(sess)
+    # Both detectors should be SimpleIframeDetection instances
+    assert isinstance(detector1, SimpleIframeDetection)
+    assert isinstance(detector2, SimpleIframeDetection)
+    # Methods should still be available and callable
+    assert hasattr(sess, "get_dom_element_by_index")
+    assert hasattr(sess, "get_element_by_index")
+
