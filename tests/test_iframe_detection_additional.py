@@ -447,3 +447,187 @@ def test_enumerate_all_frames_error_fallback_to_main(monkeypatch, caplog):
         assert isinstance(contexts, list) and len(contexts) == 1
         assert contexts[0].frame_id == "main"
         assert any("Error enumerating frames" in rec.message for rec in caplog.records)
+
+# ---------- Additional tests appended by CI assistant (pytest) ----------
+
+def test_click_element_in_iframe_dispatch_failure(monkeypatch, caplog):
+    """
+    When CDP dispatchMouseEvent raises, click_element_in_iframe should handle it
+    gracefully and return False while logging an error.
+    """
+    sess = FakeBrowserSession()
+    det = SimpleIframeDetection(sess)
+
+    ctx = FrameContext(
+        frame_id="iframe_ERR",
+        target_id="ERR",
+        dom_nodes={},
+        coordinate_offset=(10, 20),
+        is_cross_origin=True,
+        parent_frame_id="main",
+    )
+    elem = FakeElement(FakeRect(2, 4, 6, 8))
+    cfe = CrossFrameElement(element=elem, frame_context=ctx, original_index=3, cross_frame_index=10003)
+
+    # Force the dispatch function to raise
+    async def _raise(**kwargs):
+        raise RuntimeError("dispatch failed")
+
+    monkeypatch.setattr(sess.cdp_client.send.Input, "dispatchMouseEvent", _raise)
+
+    with caplog.at_level(logging.ERROR):
+        ok = arun(det.click_element_in_iframe(cfe))
+        assert ok is False
+        assert any("dispatch" in rec.message.lower() or "mouse" in rec.message.lower() for rec in caplog.records)
+
+
+def test_get_element_by_index_caches_cross_frame_idempotently(monkeypatch):
+    """
+    Calling get_element_by_index_with_iframe_support repeatedly for the same
+    element inside an iframe should not create multiple cross-frame entries.
+    This test asserts _next_cross_frame_index advances only once.
+    """
+    target_elem = FakeElement(FakeRect(11, 12, 13, 14))
+    iframe_ctx = FrameContext(
+        frame_id="iframe_CACHE",
+        target_id="CACHE",
+        dom_nodes={99: target_elem},
+        coordinate_offset=(5, 5),
+        is_cross_origin=True,
+        parent_frame_id="main",
+    )
+    sess = FakeBrowserSession(main_lookup={})
+    det = SimpleIframeDetection(sess)
+
+    async def _frames():
+        # First is main frame, then iframe with our node
+        return [arun(det._get_main_frame_context()), iframe_ctx]
+
+    monkeypatch.setattr(det, "_enumerate_all_frames", _frames)
+
+    start = det._next_cross_frame_index
+    # First lookup populates cache
+    r1 = arun(det.get_element_by_index_with_iframe_support(99))
+    # Second lookup should hit the same element without allocating a new cross-frame slot
+    r2 = arun(det.get_element_by_index_with_iframe_support(99))
+
+    assert r1 is target_elem and r2 is target_elem
+    assert det._next_cross_frame_index == start + 1, "Should allocate only one cross-frame index for repeated lookups"
+    # Ensure exactly one cross-frame entry maps back to the same element
+    entries = [e for e in det._cross_frame_elements.values() if e.original_index == 99 and e.element is target_elem]
+    assert len(entries) == 1
+
+
+def test_enhanced_get_element_by_index_none_when_not_found(monkeypatch):
+    """
+    Controller returns None from enhanced_get_element_by_index when detector cannot find the element.
+    """
+    sess = FakeBrowserSession()
+    ctrl = IframeAwareController(original_controller=None, browser_session=sess)
+
+    async def _getter(idx: int):
+        return None
+
+    monkeypatch.setattr(ctrl.iframe_detection, "get_element_by_index_with_iframe_support", _getter)
+    res = arun(ctrl.enhanced_get_element_by_index(404))
+    assert res is None
+
+
+def test_controller_enhanced_click_element_by_index_not_found_returns_false(monkeypatch):
+    """
+    If enhanced_get_element_by_index returns None (element not found anywhere),
+    enhanced_click_element_by_index should return False (no click performed).
+    """
+    sess = FakeBrowserSession()
+    ctrl = IframeAwareController(original_controller=None, browser_session=sess)
+
+    async def _getter(idx: int):
+        return None
+
+    monkeypatch.setattr(ctrl, "enhanced_get_element_by_index", _getter)
+    ok = arun(ctrl.enhanced_click_element_by_index(404))
+    assert ok is False
+
+
+def test_transform_coordinates_to_global_zero_offset_and_large_rect():
+    """
+    Validate transform on zero offsets and large dimensions to ensure no overflow or miscalculation.
+    """
+    sess = FakeBrowserSession()
+    det = SimpleIframeDetection(sess)
+    ctx = FrameContext(frame_id="main", target_id="t0", dom_nodes={}, coordinate_offset=(0, 0))
+    # (x, y, w, h) unchanged with zero offset
+    assert det.transform_coordinates_to_global((1000, 2000, 3000, 4000), ctx) == (1000, 2000, 3000, 4000)
+
+
+def test_get_iframe_context_returns_none_when_dom_nodes_unavailable(monkeypatch, caplog):
+    """
+    If _get_iframe_dom_nodes raises or returns a non-dict, _get_iframe_context should log and return None.
+    """
+    sess = FakeBrowserSession()
+    det = SimpleIframeDetection(sess)
+
+    async def _offset(_tid: str):
+        return (1, 1)
+
+    async def _bad_dom(_tid: str):
+        raise RuntimeError("dom collection failed")
+
+    monkeypatch.setattr(det, "_calculate_iframe_offset", _offset)
+    monkeypatch.setattr(det, "_get_iframe_dom_nodes", _bad_dom)
+
+    with caplog.at_level(logging.ERROR):
+        ctx = arun(det._get_iframe_context("target-BAD"))
+        assert ctx is None
+        assert any("iframe context" in rec.message.lower() or "dom" in rec.message.lower() for rec in caplog.records)
+
+
+def test_enumerate_all_frames_includes_only_unique_frames(monkeypatch):
+    """
+    If DomService returns duplicate targetIds, _enumerate_all_frames should only include unique iframe contexts.
+    """
+    # Create synthetic DomService that returns dup targetIds
+    service_mod = ModuleType("browser_use.dom.service")
+    dom_pkg = sys.modules.get("browser_use.dom") or ModuleType("browser_use.dom")
+    root_pkg = sys.modules.get("browser_use") or ModuleType("browser_use")
+    sys.modules["browser_use"] = root_pkg
+    sys.modules["browser_use.dom"] = dom_pkg
+    sys.modules["browser_use.dom.service"] = service_mod
+
+    class _Targets:
+        def __init__(self) -> None:
+            self.iframe_sessions = [{"targetId": "DUPL0001"}, {"targetId": "DUPL0001"}]
+
+    class DomService:
+        def __init__(self, _session: Any) -> None:
+            self._session = _session
+        async def __aenter__(self) -> "DomService":
+            return self
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+        async def _get_targets_for_page(self) -> _Targets:
+            return _Targets()
+
+    setattr(service_mod, "DomService", DomService)
+
+    sess = FakeBrowserSession()
+    det = SimpleIframeDetection(sess)
+
+    # Deterministic creation of iframe contexts
+    async def _mk_ctx(tid: str) -> FrameContext:
+        return FrameContext(
+            frame_id=f"iframe_{tid[-4:]}",
+            target_id=tid,
+            dom_nodes={},
+            coordinate_offset=(0, 0),
+            is_cross_origin=True,
+            parent_frame_id="main",
+        )
+
+    monkeypatch.setattr(det, "_get_iframe_context", _mk_ctx)
+    contexts = arun(det._enumerate_all_frames())
+    # Expect: main + one unique iframe
+    assert len(contexts) == 2
+    assert contexts[0].frame_id == "main"
+    assert any(c.frame_id == "iframe_0001" for c in contexts[1:])
+
