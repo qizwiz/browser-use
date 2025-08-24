@@ -611,7 +611,10 @@ def patch_browser_use_with_iframe_support(browser_session: 'BrowserSession'):
     BrowserSession.get_element_by_index = enhanced_get_dom_element_by_index
     
     logger.info("✅ Browser-use enhanced with iframe detection support")
-    
+    # Also patch the instance if it has the attribute (for test compatibility)
+    if hasattr(browser_session, "get_dom_element_by_index"):
+        browser_session.get_dom_element_by_index = enhanced_get_dom_element_by_index
+        browser_session.get_element_by_index = enhanced_get_dom_element_by_index    
     # Return a detection instance for direct use if needed
     return SimpleIframeDetection(browser_session)
 
