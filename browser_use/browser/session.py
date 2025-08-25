@@ -1941,6 +1941,47 @@ class BrowserSession(BaseModel):
 
 		return await self.get_or_create_cdp_session()
 
+	# Public navigation methods for backward compatibility
+	async def navigate(self, url: str, new_tab: bool = False) -> None:
+		"""Navigate to URL in current or new tab.
+		
+		Public wrapper for NavigateToUrlEvent.
+		"""
+		from browser_use.browser.events import NavigateToUrlEvent
+		await self.event_bus.dispatch(NavigateToUrlEvent(url=url, new_tab=new_tab))
+	
+	async def navigate_to(self, url: str, new_tab: bool = False) -> None:
+		"""Navigate to URL in current or new tab.
+		
+		Alias for navigate().
+		"""
+		return await self.navigate(url, new_tab)
+	
+	async def create_new_tab(self, url: str = 'about:blank') -> str:
+		"""Create a new tab and navigate to URL.
+		
+		Public wrapper for _cdp_create_new_page.
+		Returns target ID of new tab.
+		"""
+		target_id = await self._cdp_create_new_page(url)
+		return target_id
+		
+	async def switch_tab(self, target_id: str) -> None:
+		"""Switch to specified tab.
+		
+		Public wrapper for SwitchTabEvent.
+		"""
+		from browser_use.browser.events import SwitchTabEvent
+		await self.event_bus.dispatch(SwitchTabEvent(target_id=target_id))
+		
+	async def close_tab(self, target_id: str) -> None:
+		"""Close specified tab.
+		
+		Public wrapper for CloseTabEvent.
+		"""
+		from browser_use.browser.events import CloseTabEvent
+		await self.event_bus.dispatch(CloseTabEvent(target_id=target_id))
+
 
 # # Fix Pydantic circular dependency for all watchdogs
 # # This must be called after BrowserSession class is fully defined

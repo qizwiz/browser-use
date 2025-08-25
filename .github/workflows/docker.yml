@@ -2,6 +2,8 @@ name: docker
 
 on:
   push:
+    branches-ignore:
+      - fix-iframe-element-detection  # Skip Docker for our iframe testing branch
   release:
     types: [published]
 
