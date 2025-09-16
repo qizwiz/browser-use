@@ -113,7 +113,6 @@ class ChatAzureOpenAI(ChatOpenAILike):
 
 		This override ensures compatibility with Azure OpenAI endpoints.
 		"""
-		from browser_use.llm.openai.chat import ReasoningModels
 		from browser_use.llm.openai.serializer import OpenAIMessageSerializer
 
 		openai_messages = OpenAIMessageSerializer.serialize_messages(messages)
@@ -141,24 +140,23 @@ class ChatAzureOpenAI(ChatOpenAILike):
 			# Skip reasoning_effort for Azure (not supported)
 
 			# For reasoning models on Azure, only remove temperature/frequency_penalty
-			if any(str(m).lower() in str(self.model).lower() for m in ReasoningModels):
+			reasoning_models = self.reasoning_models or [
+			    "o4-mini",
+			    "o3",
+			    "o3-mini",
+			    "o1",
+			    "o1-pro",
+			    "o3-pro",
+			    "gpt-5",
+			    "gpt-5-mini",
+			    "gpt-5-nano",
+			]
+
+			if any(str(m).lower() in str(self.model).lower() for m in reasoning_models):
 				# Remove conflicting parameters for reasoning models
-				del model_params['temperature']
-				if 'frequency_penalty' in model_params:
-					del model_params['frequency_penalty']
-
-			# Call parent's logic for the actual API call and response handling
-			# but with filtered parameters
-			if output_format is None:
-				response = await self.get_client().chat.completions.create(
-					model=self.model,
-					messages=openai_messages,
-					**model_params,
-				)
-
-				usage = self._get_usage(response)
-				return ChatInvokeCompletion(
-					completion=response.choices[0].message.content or '',
+				del model_params["temperature"]
+				if "frequency_penalty" in model_params:
+					del model_params["frequency_penalty"].message.content or '',
 					usage=usage,
 				)
 			else:
